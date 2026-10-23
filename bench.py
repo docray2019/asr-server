@@ -59,27 +59,30 @@ async def session(name, cuts, url, token, t_start, results, speed, texts, a_over
 
 async def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("wav"); ap.add_argument("--url", required=True); ap.add_argument("--token", default="")
-    ap.add_argument("--sessions", type=int, default=4); ap.add_argument("--overlap", type=float, default=0.0, help="recouvrement entre blocs (s), ex. 1"); ap.add_argument("--first", type=int, default=8, help="durée du 1er bloc (s)"); ap.add_argument("--size", type=int, default=30, help="durée des blocs suivants (s) ; 8 pour tout en blocs de 8 s"); ap.add_argument("--out", default="transcription", help="préfixe des fichiers texte écrits (un par session)"); ap.add_argument("--speed", type=float, default=1.0,
+    ap.add_argument("wav", nargs="+", help="un ou plusieurs fichiers WAV : la session i utilise le fichier i (en boucle)"); ap.add_argument("--url", required=True); ap.add_argument("--token", default="")
+    ap.add_argument("--sessions", type=int, default=0, help="nombre de sessions (défaut : un par fichier WAV)"); ap.add_argument("--overlap", type=float, default=0.0, help="recouvrement entre blocs (s), ex. 1"); ap.add_argument("--first", type=int, default=8, help="durée du 1er bloc (s)"); ap.add_argument("--size", type=int, default=30, help="durée des blocs suivants (s) ; 8 pour tout en blocs de 8 s"); ap.add_argument("--out", default="transcription", help="préfixe des fichiers texte écrits (un par session)"); ap.add_argument("--speed", type=float, default=1.0,
                     help="1 = temps réel ; 10 = dictées accélérées (test de saturation rapide)")
     a = ap.parse_args()
-    cuts = blocks(a.wav, a.first, a.size, a.overlap)
-    print(f"{len(cuts)} blocs par session, {a.sessions} sessions simultanées")
+    n = a.sessions or len(a.wav)
+    all_cuts = [blocks(w, a.first, a.size, a.overlap) for w in a.wav]
+    print(f"{n} sessions simultanées ; blocs par fichier : {[len(c) for c in all_cuts]}")
     res, texts, t0 = [], {}, time.perf_counter()
-    await asyncio.gather(*[session(f"S{i+1}", cuts, a.url, a.token, t0, res, a.speed, texts, a.overlap) for i in range(a.sessions)])
+    await asyncio.gather(*[session(f"S{i+1}", all_cuts[i % len(all_cuts)], a.url, a.token, t0, res, a.speed, texts, a.overlap) for i in range(n)])
     for name, parts in texts.items():
         fn = f"{a.out}_{name}.txt"
         with open(fn, "w", encoding="utf-8") as f:
             f.write("\n\n".join(f"[bloc {i}] {t}" for i, t in enumerate(parts)))
         print(f"\nTexte écrit dans {fn}")
     if texts:
-        first = next(iter(texts.values()))
-        print("\n===== TRANSCRIPTION (session S1) =====")
-        for i, t in enumerate(first):
-            print(f"[bloc {i}] {t}\n")
+        for name, parts in texts.items():
+            print(f"\n===== TRANSCRIPTION ({name}) =====")
+            for i, t in enumerate(parts):
+                print(f"[bloc {i}] {t}\n")
     comp = sum(r[4] for r in res); aud = sum(r[2] for r in res)
     print(f"\nVitesse de calcul : {aud/comp:.2f}× la parole par transcription ; retard max {max(r[5] for r in res):.1f}s ; file max {max(r[3] for r in res):.1f}s")
-    last = [r[5] for r in res if r[1] >= len(cuts) - 2]
+    maxseq = {}
+    for r in res: maxseq[r[0]] = max(maxseq.get(r[0], 0), r[1])
+    last = [r[5] for r in res if r[1] >= maxseq[r[0]] - 1]
     print("Verdict :", "le serveur SUIT" if max(last) < 60 else "le serveur est SATURÉ (le retard grandit)")
 
 if __name__ == "__main__":
