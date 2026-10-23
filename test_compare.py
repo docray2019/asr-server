@@ -49,7 +49,7 @@ def test_bout_en_bout(tmp_path, monkeypatch):
         (d / "ref.txt").write_text("OBS référence", encoding="utf-8")
     monkeypatch.setenv("MT_EMAIL", "a"); monkeypatch.setenv("MT_PASSWORD", "b")
     out = tmp_path / "res"
-    rc = C.main([str(root), "--only", "1-2", "--app-url", "http://127.0.0.1:8771", "--gpu-url", "http://127.0.0.1:8771/gpu",
+    rc = C.main([str(root), "--only", "1-2", "--app-url", "http://127.0.0.1:8771", "--gpu-url", "http://localhost:8771/gpu",
                  "--vps-url", "http://127.0.0.1:8771", "--judge", "--out", str(out)])
     assert rc == 0
     run = next(out.iterdir())
