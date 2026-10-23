@@ -170,7 +170,7 @@ def run_case(case, cfg, headers, profile, out_dir):
         for k in asr:
             with httpx.Client() as c:
                 j = call(c, "POST", f"{cfg.app_url}/api/admin/judge-cr", headers=headers, timeout=300,
-                         json={"transcript": res[k]["transcript"], "reference": ref, "candidate": res[k]["observation"]})
+                         json={"transcript": res[k]["transcript"], "reference": ref, "candidate": res[k]["observation"], "judge_model": cfg.judge_model})
             res[k]["judge"] = j.get("judge")
     if "A" in res and "B" in res:
         res["sim_transcript_AB"] = sim(res["A"]["transcript"], res["B"]["transcript"])
@@ -240,6 +240,7 @@ def main(argv=None):
     ap.add_argument("--vps-url", default="http://127.0.0.1:8000"); ap.add_argument("--vps-token", default="")
     ap.add_argument("--as-user", default="drmaximelaporte@runbox.com")
     ap.add_argument("--out", default="resultats"); ap.add_argument("--judge", action="store_true")
+    ap.add_argument("--judge-model", default="claude-opus-5-5", help="claude-opus-5-5 (défaut) ou claude-opus-4-8")
     ap.add_argument("--skip-a", action="store_true"); ap.add_argument("--skip-b", action="store_true")
     ap.add_argument("--resume", action="store_true", help="ne refait pas les dossiers déjà traités")
     ap.add_argument("--dry-run", action="store_true", help="liste les dossiers et fichiers trouvés, sans appel")

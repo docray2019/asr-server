@@ -59,7 +59,7 @@ Tests de la file : `pytest test_queue.py`.
 A = MedTranscript avec le serveur GPU (Whisper large-v3) ; B = ce serveur CPU. Même découpage (blocs de 8 s,
 recouvrement 1 s), puis la même chaîne : analyse Haiku → observation Sonnet 5.5 → courrier + résumé Haiku 5.5,
 avec le profil de l'utilisateur `--as-user` (défaut drmaximelaporte@runbox.com). Chaque observation est comparée à
-l'observation certifiée du dossier (similarité de texte, et note du juge Opus 4.8 avec `--judge`).
+l'observation certifiée du dossier (similarité de texte, et note du juge Opus 5.5 avec `--judge` ; `--judge-model claude-opus-4-8` pour l'ancien juge).
 
 Prérequis : l'application déployée doit contenir la PR « as_user_email + judge-cr » (docray2019/medtranscript-next #217),
 un compte **admin** (`MT_TOKEN` = jeton de session, ou `MT_EMAIL` + `MT_PASSWORD` sans 2FA), le serveur GPU allumé,
