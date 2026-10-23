@@ -70,7 +70,7 @@ def call(client, method, url, retries=3, **kw):
 
 
 # ── Transcription en blocs de 8 s / recouvrement 1 s ───────────────────────────
-def transcribe(cuts, send):
+def transcribe(cuts, send, label=""):
     """send(pcm_wav_bytes, seq, prompt) -> texte. Renvoie (parts, durées_par_bloc, wall_s)."""
     parts, lat, ctx = [], [], ""
     t0 = time.perf_counter()
@@ -81,6 +81,8 @@ def transcribe(cuts, send):
         text = merge_overlap(" ".join(parts), text) if seq else text
         parts.append(text)
         ctx = (ctx + " " + text).strip()[-400:]
+        if label and ((seq + 1) % 5 == 0 or seq + 1 == len(cuts)):
+            print(f"     {label} : bloc {seq + 1}/{len(cuts)}  ({time.perf_counter() - t0:.0f} s)", flush=True)
     return parts, lat, time.perf_counter() - t0
 
 
@@ -141,12 +143,12 @@ def run_case(case, cfg, headers, profile, out_dir):
     specialty = profile.get("specialty") or "epaule"
 
     def send_a(wavb, seq, ctx):
-        with httpx.Client(timeout=120) as c:
+        with httpx.Client(timeout=httpx.Timeout(120, connect=10)) as c:
             return call(c, "POST", f"{cfg.gpu_url}/transcribe", headers=headers,
                         files={"file": ("chunk.wav", wavb, "audio/wav")}, data={"specialty": specialty}).get("text", "").strip()
 
     def send_b(wavb, seq, ctx):
-        with httpx.Client(timeout=600) as c:
+        with httpx.Client(timeout=httpx.Timeout(600, connect=10)) as c:
             return call(c, "POST", f"{cfg.vps_url}/v1/chunk", headers=({"Authorization": f"Bearer {cfg.vps_token}"} if cfg.vps_token else {}),
                         files={"wav": ("b.wav", wavb, "audio/wav")},
                         data={"session": f"case{case['n']}", "seq": seq, "prompt": ctx}).get("text", "").strip()
@@ -155,7 +157,7 @@ def run_case(case, cfg, headers, profile, out_dir):
     if not cfg.skip_a: pipes["A"] = send_a
     if not cfg.skip_b: pipes["B"] = send_b
     with cf.ThreadPoolExecutor(2) as ex:
-        futs = {k: ex.submit(transcribe, cuts, fn) for k, fn in pipes.items()}
+        futs = {k: ex.submit(transcribe, cuts, fn, k) for k, fn in pipes.items()}
         asr = {k: f.result() for k, f in futs.items()}
     for k, (parts, lat, wall) in asr.items():
         res[k] = {"asr_wall_s": round(wall, 1), "asr_x_realtime": round(duration_s / wall, 2) if wall else None,
@@ -265,6 +267,22 @@ def main(argv=None):
     if cfg.dry_run or not cases:
         return 0
     cases = [c for c in cases if c["wav"] and c["txt"]]
+
+    def reachable(url, path):
+        try:
+            r = httpx.get(url.rstrip("/") + path, timeout=httpx.Timeout(15, connect=8))
+            return True, r
+        except httpx.HTTPError as e:
+            return False, e
+    if not cfg.skip_b:
+        ok, r = reachable(cfg.vps_url, "/health")
+        if not ok: sys.exit(f"Serveur CPU (B) injoignable à {cfg.vps_url} : tunnel SSH ouvert ? serveur lancé ? ({r})")
+        try: h = r.json(); print(f"CPU OK : moteur {h.get('engine')} / modèle {h.get('model')}, {h.get('workers')} worker(s)")
+        except ValueError: print(f"CPU répond (HTTP {r.status_code}) mais pas comme attendu sur /health")
+    if not cfg.skip_a:
+        ok, r = reachable(cfg.gpu_url, "/health")
+        if not ok: sys.exit(f"Serveur GPU (A) injoignable à {cfg.gpu_url} : est-il allumé ? ({r})")
+        print(f"GPU répond (HTTP {r.status_code})")
 
     token = os.environ.get("MT_TOKEN")
     if not token:
