@@ -156,6 +156,31 @@ def judge_case(res, ref, cfg, headers):
             res[k]["judge"] = j.get("judge")
 
 
+def duel_case(res, ref, cfg, headers):
+    """Opus compare A et B entre eux et avec la référence, en aveugle (ordre X/Y alterné selon le n° du cas)."""
+    if res.get("duel") or not all(res.get(k, {}).get("observation") for k in ("A", "B")):
+        return
+    first, second = ("A", "B") if res["n"] % 2 else ("B", "A")
+    print(f"     duel {cfg.judge_model} : A contre B (aveugle)…", flush=True)
+    with httpx.Client() as c:
+        j = call(c, "POST", f"{cfg.app_url}/api/admin/judge-cr", headers=headers, timeout=300, json={
+            "mode": "pair", "reference": ref, "judge_model": cfg.judge_model,
+            "transcript_x": res[first]["transcript"], "candidate_x": res[first]["observation"],
+            "transcript_y": res[second]["transcript"], "candidate_y": res[second]["observation"]})
+    d = j.get("judge") or {}
+    if d.get("parse_error"):
+        res["duel"] = d
+        return
+    m = {"X": first, "Y": second}
+    best = d.get("meilleur")
+    out = {"gagnant": m.get(best, "egal"), "ordre": f"X={first}, Y={second}",
+           "origine_ecarts": d.get("origine_ecarts"), "verdict": d.get("verdict")}
+    for key in ("score", "fidelite", "completude", "erreurs"):
+        for xy, k in m.items():
+            out[f"{key}_{k}"] = d.get(f"{key}_{xy}")
+    res["duel"] = out
+
+
 def run_case(case, cfg, headers, profile, out_dir):
     ref = read_text_any(case["txt"]).strip()
     cuts = blocks(str(case["wav"]), 8, 8, 1.0)
@@ -191,6 +216,7 @@ def run_case(case, cfg, headers, profile, out_dir):
 
     if cfg.judge:
         judge_case(res, ref, cfg, headers)
+        duel_case(res, ref, cfg, headers)
     if "A" in res and "B" in res:
         res["sim_transcript_AB"] = sim(res["A"]["transcript"], res["B"]["transcript"])
         res["sim_obs_AB"] = sim(res["A"]["observation"], res["B"]["observation"])
@@ -214,7 +240,7 @@ def pre(t):
 
 def write_report(results, out_dir):
     cols = ["n", "name", "duration_s", "A_x_realtime", "B_x_realtime", "sim_transcript_AB", "sim_obs_AB",
-            "A_sim_obs_ref", "B_sim_obs_ref", "A_judge", "B_judge", "A_skill", "B_skill"]
+            "A_sim_obs_ref", "B_sim_obs_ref", "A_judge", "B_judge", "duel_gagnant", "duel_score_A", "duel_score_B", "duel_origine", "A_skill", "B_skill"]
     with open(out_dir / "resume.csv", "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f, delimiter=";"); w.writerow(cols)
         for r in results:
@@ -222,11 +248,14 @@ def write_report(results, out_dir):
             w.writerow([r["n"], r["name"], r["duration_s"], g("A", "asr_x_realtime"), g("B", "asr_x_realtime"),
                         r.get("sim_transcript_AB"), r.get("sim_obs_AB"), g("A", "sim_obs_ref"), g("B", "sim_obs_ref"),
                         (g("A", "judge") or {}).get("score_global"), (g("B", "judge") or {}).get("score_global"),
-                        g("A", "skill"), g("B", "skill")])
+                        (r.get("duel") or {}).get("gagnant"), (r.get("duel") or {}).get("score_A"), (r.get("duel") or {}).get("score_B"),
+                        (r.get("duel") or {}).get("origine_ecarts"), g("A", "skill"), g("B", "skill")])
     parts = ["<!doctype html><html lang=fr><head><meta charset=utf-8><title>Comparaison A/B</title><style>body{font-family:system-ui;margin:20px}"
              "table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px;vertical-align:top}"
              "pre{white-space:pre-wrap;font-size:12px;margin:0}.g{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}"
              "details{margin:6px 0}</style></head><body><h1>A (GPU Whisper large-v3) vs B (CPU)</h1>"]
+    w = [(r.get("duel") or {}).get("gagnant") for r in results]
+    parts.append(f"<p><b>Duels Opus :</b> A gagne {w.count('A')} · B gagne {w.count('B')} · égalité {w.count('egal')} sur {sum(1 for x in w if x)} cas jugés.</p>")
     for r in results:
         parts.append(f"<h2>{html.escape(r['name'])} — {r['duration_s']} s</h2><table><tr><th></th><th>A</th><th>B</th></tr>")
         for lab, f_ in [("Transcription (× temps réel)", "asr_x_realtime"), ("Latence moyenne / bloc (s)", "chunk_latency_mean_s"),
@@ -237,6 +266,13 @@ def write_report(results, out_dir):
         parts.append("<tr><td>Juge Opus (global / fidélité / complétude)</td>" + "".join(
             f"<td>{html.escape(json.dumps({x: (r.get(k) or {}).get('judge', {}).get(x) for x in ('score_global','fidelite_clinique','completude')}) if (r.get(k) or {}).get('judge') else '—')}</td>"
             for k in ("A", "B")) + "</tr></table>")
+        d = r.get("duel")
+        if d and not d.get("parse_error"):
+            parts.append(f"<p><b>Duel Opus (aveugle) : gagnant = {html.escape(str(d.get('gagnant')))}</b> — score A {d.get('score_A')} / B {d.get('score_B')}"
+                         f" · fidélité A {d.get('fidelite_A')} / B {d.get('fidelite_B')} · complétude A {d.get('completude_A')} / B {d.get('completude_B')}"
+                         f" · origine des écarts : {html.escape(str(d.get('origine_ecarts')))}<br>{html.escape(str(d.get('verdict') or ''))}<br>"
+                         f"<i>Erreurs A :</i> {html.escape(' ; '.join(map(str, d.get('erreurs_A') or [])) or '—')}<br>"
+                         f"<i>Erreurs B :</i> {html.escape(' ; '.join(map(str, d.get('erreurs_B') or [])) or '—')}</p>")
         parts.append("<details open><summary>Observations : référence | A | B</summary><div class=g>"
                      + pre(r["reference"]) + pre((r.get("A") or {}).get("observation")) + pre((r.get("B") or {}).get("observation")) + "</div></details>")
         parts.append("<details><summary>Courrier + résumé : A | B</summary><div class=g><div></div>"
@@ -322,9 +358,10 @@ def main(argv=None):
         if done:
             r = json.loads(done[0].read_text(encoding="utf-8"))
             r["reference"] = read_text_any(c["txt"]).strip()  # corrige d'anciennes références mal décodées
-            if cfg.judge and any(k in r and not r[k].get("judge") for k in ("A", "B")):
+            if cfg.judge and (any(k in r and not r[k].get("judge") for k in ("A", "B")) or not r.get("duel")):
                 try:
                     judge_case(r, r["reference"], cfg, headers)
+                    duel_case(r, r["reference"], cfg, headers)
                     done[0].write_text(json.dumps(r, ensure_ascii=False, indent=1), encoding="utf-8")
                 except Exception as e:
                     print(f"     juge impossible : {e}")

@@ -28,7 +28,11 @@ def fake_servers():
         return {"observation": ("OBS " if b["partie"] == "observation" else "SUITE ") + b["transcription"][:20], "skill": "S", "consult_type": "suivi", "model": "m"}
 
     @app.post("/api/admin/judge-cr")
-    async def judge(r: Request): return {"judge": {"score_global": 7, "fidelite_clinique": 8, "completude": 6, "erreurs_notables": ["x"]}}
+    async def judge(r: Request):
+        b = await r.json()
+        if b.get("mode") == "pair":
+            return {"judge": {"meilleur": "X", "score_X": 9, "score_Y": 5, "origine_ecarts": "transcription", "verdict": "ok", "erreurs_X": [], "erreurs_Y": ["z"]}}
+        return {"judge": {"score_global": 7, "fidelite_clinique": 8, "completude": 6, "erreurs_notables": ["x"]}}
 
     @app.post("/gpu/transcribe")
     async def gpu(file: UploadFile = File(...), specialty: str = Form("")): return {"text": f"gpu {specialty}"}
@@ -57,6 +61,8 @@ def test_bout_en_bout(tmp_path, monkeypatch):
     assert len(list(run.glob("0*_*/metrics.json"))) == 2          # dossiers 1 et 2 seulement
     m = json.loads(next(run.glob("01_*/metrics.json")).read_text(encoding="utf-8"))
     assert m["A"]["judge"]["score_global"] == 7 and m["blocks"] == 4   # 30 s en blocs de 8 s
+    assert m["duel"]["gagnant"] == "A" and m["duel"]["score_A"] == 9 and m["duel"]["score_B"] == 5  # cas 1 : X=A
+    m2 = json.loads(next(run.glob("02_*/metrics.json")).read_text(encoding="utf-8")) if list(run.glob("02_*")) else None
     assert ("transcribe", "observation", "sonnet", "drmaximelaporte@runbox.com") in calls
     assert ("transcribe", "suite", None, "drmaximelaporte@runbox.com") in calls
     assert ("analyze", 1, False) in calls and ("analyze", 3, True) in calls
