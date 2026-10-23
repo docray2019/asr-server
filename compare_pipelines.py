@@ -146,27 +146,33 @@ def read_text_any(path):
     return raw.decode("latin-1")
 
 
+def cr_text(res, k):
+    """Texte soumis au juge : l'observation, à défaut le courrier généré."""
+    r = res.get(k) or {}
+    return (r.get("observation") or "").strip() or (r.get("suite") or "").strip()
+
+
 def judge_case(res, ref, cfg, headers):
     for k in ("A", "B"):
-        if k in res and res[k].get("observation") and not res[k].get("judge"):
+        if k in res and cr_text(res, k) and not res[k].get("judge"):
             print(f"     juge {cfg.judge_model} : {k}…", flush=True)
             with httpx.Client() as c:
                 j = call(c, "POST", f"{cfg.app_url}/api/admin/judge-cr", headers=headers, timeout=300,
-                         json={"transcript": res[k]["transcript"], "reference": ref, "candidate": res[k]["observation"], "judge_model": cfg.judge_model})
+                         json={"transcript": res[k]["transcript"], "reference": ref, "candidate": cr_text(res, k), "judge_model": cfg.judge_model})
             res[k]["judge"] = j.get("judge")
 
 
 def duel_case(res, ref, cfg, headers):
     """Opus compare A et B entre eux et avec la référence, en aveugle (ordre X/Y alterné selon le n° du cas)."""
-    if res.get("duel") or not all(res.get(k, {}).get("observation") for k in ("A", "B")):
+    if res.get("duel") or not all(cr_text(res, k) for k in ("A", "B")):
         return
     first, second = ("A", "B") if res["n"] % 2 else ("B", "A")
     print(f"     duel {cfg.judge_model} : A contre B (aveugle)…", flush=True)
     with httpx.Client() as c:
         j = call(c, "POST", f"{cfg.app_url}/api/admin/judge-cr", headers=headers, timeout=300, json={
             "mode": "pair", "reference": ref, "judge_model": cfg.judge_model,
-            "transcript_x": res[first]["transcript"], "candidate_x": res[first]["observation"],
-            "transcript_y": res[second]["transcript"], "candidate_y": res[second]["observation"]})
+            "transcript_x": res[first]["transcript"], "candidate_x": cr_text(res, first),
+            "transcript_y": res[second]["transcript"], "candidate_y": cr_text(res, second)})
     d = j.get("judge") or {}
     if d.get("parse_error"):
         res["duel"] = d
@@ -215,7 +221,7 @@ def run_case(case, cfg, headers, profile, out_dir):
             res[k].update(f.result())
 
     if cfg.judge:
-        judge_case(res, ref, cfg, headers)
+        if cfg.solo_judge: judge_case(res, ref, cfg, headers)
         duel_case(res, ref, cfg, headers)
     if "A" in res and "B" in res:
         res["sim_transcript_AB"] = sim(res["A"]["transcript"], res["B"]["transcript"])
@@ -296,6 +302,7 @@ def main(argv=None):
     ap.add_argument("--cpu-token", "--vps-token", dest="vps_token", default=os.environ.get("ASR_TOKEN", ""), help="jeton du serveur CPU (ASR_TOKEN)")
     ap.add_argument("--as-user", default="drmaximelaporte@runbox.com")
     ap.add_argument("--out", default="resultats"); ap.add_argument("--judge", dest="judge", action="store_true", default=True, help=argparse.SUPPRESS)
+    ap.add_argument("--solo-judge", action="store_true", help="en plus du duel, une note Opus séparée pour A et B (plus de tokens)")
     ap.add_argument("--no-judge", dest="judge", action="store_false", help="désactive le juge Opus (activé par défaut)")
     ap.add_argument("--judge-model", default="claude-opus-5-5", help="claude-opus-5-5 (défaut) ou claude-opus-4-8")
     ap.add_argument("--skip-a", action="store_true"); ap.add_argument("--skip-b", action="store_true")
@@ -358,9 +365,9 @@ def main(argv=None):
         if done:
             r = json.loads(done[0].read_text(encoding="utf-8"))
             r["reference"] = read_text_any(c["txt"]).strip()  # corrige d'anciennes références mal décodées
-            if cfg.judge and (any(k in r and not r[k].get("judge") for k in ("A", "B")) or not r.get("duel")):
+            if cfg.judge and ((cfg.solo_judge and any(k in r and not r[k].get("judge") for k in ("A", "B"))) or not r.get("duel")):
                 try:
-                    judge_case(r, r["reference"], cfg, headers)
+                    if cfg.solo_judge: judge_case(r, r["reference"], cfg, headers)
                     duel_case(r, r["reference"], cfg, headers)
                     done[0].write_text(json.dumps(r, ensure_ascii=False, indent=1), encoding="utf-8")
                 except Exception as e:

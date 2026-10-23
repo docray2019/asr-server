@@ -54,7 +54,7 @@ def test_bout_en_bout(tmp_path, monkeypatch):
     monkeypatch.setenv("MT_EMAIL", "a"); monkeypatch.setenv("MT_PASSWORD", "b")
     out = tmp_path / "res"
     rc = C.main([str(root), "--only", "1-2", "--app-url", "http://127.0.0.1:8771", "--gpu-url", "http://localhost:8771/gpu",
-                 "--vps-url", "http://127.0.0.1:8771", "--judge", "--out", str(out)])
+                 "--vps-url", "http://127.0.0.1:8771", "--judge", "--solo-judge", "--out", str(out)])
     assert rc == 0
     run = next(out.iterdir())
     assert (run / "rapport.html").exists() and (run / "resume.csv").exists()
