@@ -146,6 +146,16 @@ def read_text_any(path):
     return raw.decode("latin-1")
 
 
+def judge_case(res, ref, cfg, headers):
+    for k in ("A", "B"):
+        if k in res and res[k].get("observation") and not res[k].get("judge"):
+            print(f"     juge {cfg.judge_model} : {k}…", flush=True)
+            with httpx.Client() as c:
+                j = call(c, "POST", f"{cfg.app_url}/api/admin/judge-cr", headers=headers, timeout=300,
+                         json={"transcript": res[k]["transcript"], "reference": ref, "candidate": res[k]["observation"], "judge_model": cfg.judge_model})
+            res[k]["judge"] = j.get("judge")
+
+
 def run_case(case, cfg, headers, profile, out_dir):
     ref = read_text_any(case["txt"]).strip()
     cuts = blocks(str(case["wav"]), 8, 8, 1.0)
@@ -180,11 +190,7 @@ def run_case(case, cfg, headers, profile, out_dir):
             res[k].update(f.result())
 
     if cfg.judge:
-        for k in asr:
-            with httpx.Client() as c:
-                j = call(c, "POST", f"{cfg.app_url}/api/admin/judge-cr", headers=headers, timeout=300,
-                         json={"transcript": res[k]["transcript"], "reference": ref, "candidate": res[k]["observation"], "judge_model": cfg.judge_model})
-            res[k]["judge"] = j.get("judge")
+        judge_case(res, ref, cfg, headers)
     if "A" in res and "B" in res:
         res["sim_transcript_AB"] = sim(res["A"]["transcript"], res["B"]["transcript"])
         res["sim_obs_AB"] = sim(res["A"]["observation"], res["B"]["observation"])
@@ -253,7 +259,8 @@ def main(argv=None):
     ap.add_argument("--cpu-url", "--vps-url", dest="vps_url", default="http://127.0.0.1:8000", help="serveur CPU (B), via le tunnel SSH")
     ap.add_argument("--cpu-token", "--vps-token", dest="vps_token", default=os.environ.get("ASR_TOKEN", ""), help="jeton du serveur CPU (ASR_TOKEN)")
     ap.add_argument("--as-user", default="drmaximelaporte@runbox.com")
-    ap.add_argument("--out", default="resultats"); ap.add_argument("--judge", action="store_true")
+    ap.add_argument("--out", default="resultats"); ap.add_argument("--judge", dest="judge", action="store_true", default=True, help=argparse.SUPPRESS)
+    ap.add_argument("--no-judge", dest="judge", action="store_false", help="désactive le juge Opus (activé par défaut)")
     ap.add_argument("--judge-model", default="claude-opus-5-5", help="claude-opus-5-5 (défaut) ou claude-opus-4-8")
     ap.add_argument("--skip-a", action="store_true"); ap.add_argument("--skip-b", action="store_true")
     ap.add_argument("--resume", action="store_true", help="ne refait pas les dossiers déjà traités")
@@ -315,6 +322,12 @@ def main(argv=None):
         if done:
             r = json.loads(done[0].read_text(encoding="utf-8"))
             r["reference"] = read_text_any(c["txt"]).strip()  # corrige d'anciennes références mal décodées
+            if cfg.judge and any(k in r and not r[k].get("judge") for k in ("A", "B")):
+                try:
+                    judge_case(r, r["reference"], cfg, headers)
+                    done[0].write_text(json.dumps(r, ensure_ascii=False, indent=1), encoding="utf-8")
+                except Exception as e:
+                    print(f"     juge impossible : {e}")
             results.append(r); print(f"[{c['n']}] déjà traité"); continue
         print(f"[{c['n']}] {c['dir'].name} …", flush=True)
         try:
