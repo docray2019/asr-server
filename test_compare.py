@@ -71,7 +71,7 @@ def test_bout_en_bout(tmp_path, monkeypatch):
     for mf in run.glob("0*_*/metrics.json"):
         d = json.loads(mf.read_text(encoding="utf-8")); d.pop("duel", None); mf.write_text(json.dumps(d), encoding="utf-8")
     n_before = len(calls)
-    rc = C.main([str(root), "--only", "1-3", "--app-url", "http://127.0.0.1:8771", "--duel-only", "--resume", "--out", str(run)])
+    rc = C.main([str(root), "--only", "1-3", "--app-url", "http://127.0.0.1:8771", "--duel-only", "--out", str(run)])
     assert rc == 0 and len(calls) == n_before
     assert json.loads(next(run.glob("01_*/metrics.json")).read_text(encoding="utf-8"))["duel"]["gagnant"] == "A"
 

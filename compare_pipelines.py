@@ -362,7 +362,7 @@ def main(argv=None):
             profile = call(c, "GET", f"{cfg.app_url}/api/admin/user-profile", headers=headers, params={"email": cfg.as_user})["profile"]
         print(f"Profil de {cfg.as_user} : {profile}")
 
-    out_dir = Path(cfg.out) / time.strftime("%Y%m%d_%H%M%S") if not cfg.resume else Path(cfg.out)
+    out_dir = Path(cfg.out) / time.strftime("%Y%m%d_%H%M%S") if not (cfg.resume or cfg.duel_only) else Path(cfg.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     results = []
     if cfg.duel_only:
