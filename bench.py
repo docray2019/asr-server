@@ -53,10 +53,10 @@ async def session(name, cuts, url, token, t_start, results, speed, texts):
 async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("wav"); ap.add_argument("--url", required=True); ap.add_argument("--token", default="")
-    ap.add_argument("--sessions", type=int, default=4); ap.add_argument("--out", default="transcription", help="préfixe des fichiers texte écrits (un par session)"); ap.add_argument("--speed", type=float, default=1.0,
+    ap.add_argument("--sessions", type=int, default=4); ap.add_argument("--first", type=int, default=8, help="durée du 1er bloc (s)"); ap.add_argument("--size", type=int, default=30, help="durée des blocs suivants (s) ; 8 pour tout en blocs de 8 s"); ap.add_argument("--out", default="transcription", help="préfixe des fichiers texte écrits (un par session)"); ap.add_argument("--speed", type=float, default=1.0,
                     help="1 = temps réel ; 10 = dictées accélérées (test de saturation rapide)")
     a = ap.parse_args()
-    cuts = blocks(a.wav)
+    cuts = blocks(a.wav, a.first, a.size)
     print(f"{len(cuts)} blocs par session, {a.sessions} sessions simultanées")
     res, texts, t0 = [], {}, time.perf_counter()
     await asyncio.gather(*[session(f"S{i+1}", cuts, a.url, a.token, t0, res, a.speed, texts) for i in range(a.sessions)])
