@@ -135,8 +135,19 @@ def sim(a, b):
 
 
 # ── Un dossier ─────────────────────────────────────────────────────────────────
+def read_text_any(path):
+    """Lit un .txt en UTF-8 (avec ou sans BOM), sinon en Windows-1252 (Bloc-notes / Word)."""
+    raw = Path(path).read_bytes()
+    for enc in ("utf-8-sig", "cp1252"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            pass
+    return raw.decode("latin-1")
+
+
 def run_case(case, cfg, headers, profile, out_dir):
-    ref = case["txt"].read_text(encoding="utf-8", errors="replace").strip()
+    ref = read_text_any(case["txt"]).strip()
     cuts = blocks(str(case["wav"]), 8, 8, 1.0)
     duration_s = round(sum(n for _p, n in cuts), 1)
     res = {"n": case["n"], "name": case["dir"].name, "duration_s": duration_s, "blocks": len(cuts), "reference": ref}
@@ -206,10 +217,10 @@ def write_report(results, out_dir):
                         r.get("sim_transcript_AB"), r.get("sim_obs_AB"), g("A", "sim_obs_ref"), g("B", "sim_obs_ref"),
                         (g("A", "judge") or {}).get("score_global"), (g("B", "judge") or {}).get("score_global"),
                         g("A", "skill"), g("B", "skill")])
-    parts = ["<!doctype html><meta charset=utf-8><title>Comparaison A/B</title><style>body{font-family:system-ui;margin:20px}"
+    parts = ["<!doctype html><html lang=fr><head><meta charset=utf-8><title>Comparaison A/B</title><style>body{font-family:system-ui;margin:20px}"
              "table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:4px 8px;vertical-align:top}"
              "pre{white-space:pre-wrap;font-size:12px;margin:0}.g{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}"
-             "details{margin:6px 0}</style><h1>A (GPU Whisper large-v3) vs B (CPU)</h1>"]
+             "details{margin:6px 0}</style></head><body><h1>A (GPU Whisper large-v3) vs B (CPU)</h1>"]
     for r in results:
         parts.append(f"<h2>{html.escape(r['name'])} — {r['duration_s']} s</h2><table><tr><th></th><th>A</th><th>B</th></tr>")
         for lab, f_ in [("Transcription (× temps réel)", "asr_x_realtime"), ("Latence moyenne / bloc (s)", "chunk_latency_mean_s"),
@@ -302,7 +313,9 @@ def main(argv=None):
     for c in cases:
         done = list(out_dir.glob(f"{c['n']:02d}_*/metrics.json")) if cfg.resume else []
         if done:
-            results.append(json.loads(done[0].read_text(encoding="utf-8"))); print(f"[{c['n']}] déjà traité"); continue
+            r = json.loads(done[0].read_text(encoding="utf-8"))
+            r["reference"] = read_text_any(c["txt"]).strip()  # corrige d'anciennes références mal décodées
+            results.append(r); print(f"[{c['n']}] déjà traité"); continue
         print(f"[{c['n']}] {c['dir'].name} …", flush=True)
         try:
             r = run_case(c, cfg, headers, profile, out_dir)
