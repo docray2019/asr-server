@@ -307,6 +307,9 @@ def main(argv=None):
     ap.add_argument("--judge-model", default="claude-opus-5-5", help="claude-opus-5-5 (défaut) ou claude-opus-4-8")
     ap.add_argument("--skip-a", action="store_true"); ap.add_argument("--skip-b", action="store_true")
     ap.add_argument("--resume", action="store_true", help="ne refait pas les dossiers déjà traités")
+    ap.add_argument("--duel-only", "--juge-seulement", dest="duel_only", action="store_true",
+                    help="AUCUNE transcription ni génération : relit les metrics.json déjà produits et lance seulement le duel Opus A/B + référence")
+    ap.add_argument("--also", nargs="*", default=[], help="avec --duel-only : autres dossiers de résultats à parcourir (cas répartis sur plusieurs lancements)")
     ap.add_argument("--dry-run", action="store_true", help="liste les dossiers et fichiers trouvés, sans appel")
     cfg = ap.parse_args(argv)
 
@@ -335,12 +338,12 @@ def main(argv=None):
             return True, r
         except httpx.HTTPError as e:
             return False, e
-    if not cfg.skip_b:
+    if not cfg.skip_b and not cfg.duel_only:
         ok, r = reachable(cfg.vps_url, "/health")
         if not ok: sys.exit(f"Serveur CPU (B) injoignable à {cfg.vps_url} : tunnel SSH ouvert ? serveur lancé ? ({r})")
         try: h = r.json(); print(f"CPU OK : moteur {h.get('engine')} / modèle {h.get('model')}, {h.get('workers')} worker(s)")
         except ValueError: print(f"CPU répond (HTTP {r.status_code}) mais pas comme attendu sur /health")
-    if not cfg.skip_a:
+    if not cfg.skip_a and not cfg.duel_only:
         ok, r = reachable(cfg.gpu_url, "/health")
         if not ok: sys.exit(f"Serveur GPU (A) injoignable à {cfg.gpu_url} : est-il allumé ? ({r})")
         print(f"GPU répond (HTTP {r.status_code})")
@@ -353,15 +356,22 @@ def main(argv=None):
             sys.exit(f"Connexion impossible ({r.status_code}) : {r.text[:200]}\nDéfinissez MT_TOKEN (jeton de session admin) si le compte a la 2FA.")
         token = r.json()["token"]
     headers = {"Authorization": f"Bearer {token}"}
-    with httpx.Client() as c:
-        profile = call(c, "GET", f"{cfg.app_url}/api/admin/user-profile", headers=headers, params={"email": cfg.as_user})["profile"]
-    print(f"Profil de {cfg.as_user} : {profile}")
+    profile = None
+    if not cfg.duel_only:
+        with httpx.Client() as c:
+            profile = call(c, "GET", f"{cfg.app_url}/api/admin/user-profile", headers=headers, params={"email": cfg.as_user})["profile"]
+        print(f"Profil de {cfg.as_user} : {profile}")
 
     out_dir = Path(cfg.out) / time.strftime("%Y%m%d_%H%M%S") if not cfg.resume else Path(cfg.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     results = []
+    if cfg.duel_only:
+        print("MODE DUEL SEUL : aucune transcription, aucun appel aux serveurs A/B ni à Sonnet/Haiku.")
+    srcs = [out_dir] + [Path(x) for x in cfg.also]
     for c in cases:
-        done = list(out_dir.glob(f"{c['n']:02d}_*/metrics.json")) if cfg.resume else []
+        done = [m for d in srcs for m in d.glob(f"{c['n']:02d}_*/metrics.json")] if (cfg.resume or cfg.duel_only) else []
+        if cfg.duel_only and not done:
+            print(f"[{c['n']}] aucun résultat existant → ignoré (pas de transcription en mode duel seul)"); continue
         if done:
             r = json.loads(done[0].read_text(encoding="utf-8"))
             r["reference"] = read_text_any(c["txt"]).strip()  # corrige d'anciennes références mal décodées
