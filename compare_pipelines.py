@@ -251,7 +251,7 @@ def main(argv=None):
     ap.add_argument("--app-url", default=os.environ.get("MT_URL", "https://medtranscript-next.vercel.app"))
     ap.add_argument("--gpu-url", default=os.environ.get("GPU_URL", "https://whisper.medtranscript.fr"))
     ap.add_argument("--cpu-url", "--vps-url", dest="vps_url", default="http://127.0.0.1:8000", help="serveur CPU (B), via le tunnel SSH")
-    ap.add_argument("--cpu-token", "--vps-token", dest="vps_token", default="", help="jeton du serveur CPU (ASR_TOKEN)")
+    ap.add_argument("--cpu-token", "--vps-token", dest="vps_token", default=os.environ.get("ASR_TOKEN", ""), help="jeton du serveur CPU (ASR_TOKEN)")
     ap.add_argument("--as-user", default="drmaximelaporte@runbox.com")
     ap.add_argument("--out", default="resultats"); ap.add_argument("--judge", action="store_true")
     ap.add_argument("--judge-model", default="claude-opus-5-5", help="claude-opus-5-5 (défaut) ou claude-opus-4-8")
