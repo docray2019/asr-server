@@ -1,0 +1,66 @@
+"""Banc d'essai : N dictées simultanées (par défaut 4) découpées en blocs de 30 s
+(1er bloc de 8 s, comme l'application), envoyées au serveur comme le ferait le navigateur,
+au rythme de la parole (le bloc k part quand il a été « dicté »).
+
+  python bench.py audio.wav --url http://IP:8000 --token XXX --sessions 4
+Affiche, par bloc : attente en file, calcul, retard total par rapport à la fin du bloc.
+Le verdict : le retard reste-t-il stable (le serveur suit) ou grandit-il (il est saturé) ?
+"""
+import argparse, asyncio, io, time, wave
+import httpx
+
+
+def blocks(path, first_s=8, size_s=30):
+    with wave.open(path) as w:
+        assert w.getframerate() == 16000 and w.getnchannels() == 1 and w.getsampwidth() == 2, "WAV 16 kHz mono 16 bits requis"
+        pcm = w.readframes(w.getnframes())
+    step = 32000
+    cuts, pos, first = [], 0, True
+    while pos < len(pcm):
+        n = (first_s if first else size_s) * step
+        cuts.append(pcm[pos:pos + n]); pos += n; first = False
+    return cuts
+
+
+def wav_bytes(pcm):
+    b = io.BytesIO()
+    with wave.open(b, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(pcm)
+    return b.getvalue()
+
+
+async def session(name, cuts, url, token, t_start, results, speed):
+    prompt = ""
+    async with httpx.AsyncClient(timeout=600) as c:
+        ready_at = 0.0
+        for seq, pcm in enumerate(cuts):
+            ready_at += len(pcm) / 32000 / speed                  # instant où le bloc a fini d'être « dicté »
+            wait = t_start + ready_at - time.perf_counter()
+            if wait > 0: await asyncio.sleep(wait)
+            r = await c.post(f"{url}/v1/chunk", headers={"Authorization": f"Bearer {token}"},
+                             data={"session": name, "seq": seq, "prompt": prompt},
+                             files={"wav": ("b.wav", wav_bytes(pcm), "audio/wav")})
+            r.raise_for_status()
+            j = r.json()
+            lag = time.perf_counter() - (t_start + ready_at)
+            results.append((name, seq, j["audio_s"], j["queue_ms"] / 1000, j["compute_ms"] / 1000, lag))
+            print(f"{name} bloc {seq}: audio {j['audio_s']:5.1f}s  file {j['queue_ms']/1000:5.1f}s  calcul {j['compute_ms']/1000:5.1f}s  retard {lag:5.1f}s")
+            prompt = (prompt + " " + j["text"]).strip()[-400:]
+
+
+async def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("wav"); ap.add_argument("--url", required=True); ap.add_argument("--token", default="")
+    ap.add_argument("--sessions", type=int, default=4); ap.add_argument("--speed", type=float, default=1.0,
+                    help="1 = temps réel ; 10 = dictées accélérées (test de saturation rapide)")
+    a = ap.parse_args()
+    cuts = blocks(a.wav)
+    print(f"{len(cuts)} blocs par session, {a.sessions} sessions simultanées")
+    res, t0 = [], time.perf_counter()
+    await asyncio.gather(*[session(f"S{i+1}", cuts, a.url, a.token, t0, res, a.speed) for i in range(a.sessions)])
+    comp = sum(r[4] for r in res); aud = sum(r[2] for r in res)
+    print(f"\nVitesse de calcul : {aud/comp:.2f}× la parole par transcription ; retard max {max(r[5] for r in res):.1f}s ; file max {max(r[3] for r in res):.1f}s")
+    last = [r[5] for r in res if r[1] >= len(cuts) - 2]
+    print("Verdict :", "le serveur SUIT" if max(last) < 60 else "le serveur est SATURÉ (le retard grandit)")
+
+asyncio.run(main())
