@@ -237,7 +237,8 @@ def main(argv=None):
     ap.add_argument("root"); ap.add_argument("--only", help="ex. 1-3 ou 1,4,7-9")
     ap.add_argument("--app-url", default=os.environ.get("MT_URL", "https://medtranscript-next.vercel.app"))
     ap.add_argument("--gpu-url", default=os.environ.get("GPU_URL", "https://whisper.medtranscript.fr"))
-    ap.add_argument("--vps-url", default="http://127.0.0.1:8000"); ap.add_argument("--vps-token", default="")
+    ap.add_argument("--cpu-url", "--vps-url", dest="vps_url", default="http://127.0.0.1:8000", help="serveur CPU (B), via le tunnel SSH")
+    ap.add_argument("--cpu-token", "--vps-token", dest="vps_token", default="", help="jeton du serveur CPU (ASR_TOKEN)")
     ap.add_argument("--as-user", default="drmaximelaporte@runbox.com")
     ap.add_argument("--out", default="resultats"); ap.add_argument("--judge", action="store_true")
     ap.add_argument("--judge-model", default="claude-opus-5-5", help="claude-opus-5-5 (défaut) ou claude-opus-4-8")
@@ -246,6 +247,13 @@ def main(argv=None):
     ap.add_argument("--dry-run", action="store_true", help="liste les dossiers et fichiers trouvés, sans appel")
     cfg = ap.parse_args(argv)
 
+    from urllib.parse import urlparse
+    gh, ch = urlparse(cfg.gpu_url), urlparse(cfg.vps_url)
+    if (gh.hostname, gh.port) == (ch.hostname, ch.port) and not (cfg.skip_a or cfg.skip_b):
+        sys.exit(f"Les serveurs GPU (A) et CPU (B) pointent vers la même adresse ({cfg.gpu_url}) : vérifiez --gpu-url et --cpu-url.")
+    print(f"A = GPU (production, Whisper large-v3) : {cfg.gpu_url}{'  [IGNORÉ]' if cfg.skip_a else ''}")
+    print(f"B = CPU (test, serveur asr-server)     : {cfg.vps_url}{'  [IGNORÉ]' if cfg.skip_b else ''}")
+    print(f"Application MedTranscript              : {cfg.app_url}")
     cases = find_cases(cfg.root, parse_only(cfg.only))
     print(f"{len(cases)} dossier(s) :")
     bad = False

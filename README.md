@@ -56,6 +56,10 @@ Tests de la file : `pytest test_queue.py`.
 
 ## Comparaison A/B sur les consultations de test (`compare_pipelines.py`)
 
+**Deux serveurs distincts** : A = serveur GPU de production (`--gpu-url`, jamais modifié, seulement interrogé) ;
+B = serveur CPU de test de ce dépôt (`--cpu-url`, via tunnel SSH). Le script affiche les deux adresses au démarrage
+et refuse de démarrer si elles sont identiques.
+
 A = MedTranscript avec le serveur GPU (Whisper large-v3) ; B = ce serveur CPU. Même découpage (blocs de 8 s,
 recouvrement 1 s), puis la même chaîne : analyse Haiku → observation Sonnet 5.5 → courrier + résumé Haiku 5.5,
 avec le profil de l'utilisateur `--as-user` (défaut drmaximelaporte@runbox.com). Chaque observation est comparée à
@@ -69,7 +73,7 @@ et le tunnel SSH vers ce serveur CPU ouvert.
 pip install httpx
 $env:MT_EMAIL="vous@exemple.fr"; $env:MT_PASSWORD="..."        # ou  $env:MT_TOKEN="..."
 python compare_pipelines.py "C:\Users\docra\OneDrive\Bureau\transcription audio\fichiers wav de tests\Epaule_MaxLaporte" --dry-run --only 1-3
-python compare_pipelines.py "C:\...\Epaule_MaxLaporte" --only 1-3 --vps-url http://127.0.0.1:8000 --vps-token essai --judge
+python compare_pipelines.py "C:\...\Epaule_MaxLaporte" --only 1-3 --cpu-url http://127.0.0.1:8000 --cpu-token essai --judge
 ```
 `--dry-run` vérifie les dossiers et fichiers trouvés sans aucun appel. Sortie : `resultats\<date>\rapport.html`
 (côte à côte), `resume.csv` et, par dossier, les transcriptions, observations, courriers et `metrics.json`.
