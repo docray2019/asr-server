@@ -53,3 +53,25 @@ python bench.py dictee.wav --url http://IP:8000 --token XXXX --sessions 4 --spee
 `GET /health` donne la vitesse mesurée (`speed_x_realtime`).
 
 Tests de la file : `pytest test_queue.py`.
+
+## Comparaison A/B sur les consultations de test (`compare_pipelines.py`)
+
+A = MedTranscript avec le serveur GPU (Whisper large-v3) ; B = ce serveur CPU. Même découpage (blocs de 8 s,
+recouvrement 1 s), puis la même chaîne : analyse Haiku → observation Sonnet 5.5 → courrier + résumé Haiku 5.5,
+avec le profil de l'utilisateur `--as-user` (défaut drmaximelaporte@runbox.com). Chaque observation est comparée à
+l'observation certifiée du dossier (similarité de texte, et note du juge Opus 4.8 avec `--judge`).
+
+Prérequis : l'application déployée doit contenir la PR « as_user_email + judge-cr » (docray2019/medtranscript-next #217),
+un compte **admin** (`MT_TOKEN` = jeton de session, ou `MT_EMAIL` + `MT_PASSWORD` sans 2FA), le serveur GPU allumé,
+et le tunnel SSH vers ce serveur CPU ouvert.
+
+```powershell
+pip install httpx
+$env:MT_EMAIL="vous@exemple.fr"; $env:MT_PASSWORD="..."        # ou  $env:MT_TOKEN="..."
+python compare_pipelines.py "C:\Users\docra\OneDrive\Bureau\transcription audio\fichiers wav de tests\Epaule_MaxLaporte" --dry-run --only 1-3
+python compare_pipelines.py "C:\...\Epaule_MaxLaporte" --only 1-3 --vps-url http://127.0.0.1:8000 --vps-token essai --judge
+```
+`--dry-run` vérifie les dossiers et fichiers trouvés sans aucun appel. Sortie : `resultats\<date>\rapport.html`
+(côte à côte), `resume.csv` et, par dossier, les transcriptions, observations, courriers et `metrics.json`.
+Chaque dossier coûte de vrais appels (Haiku ×4, Sonnet ×1, Haiku ×1 par pipeline, plus Opus si `--judge`).
+`--resume` reprend un lot interrompu ; `--skip-a` / `--skip-b` ne lancent qu'un pipeline.
