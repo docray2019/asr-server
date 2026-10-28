@@ -138,6 +138,8 @@ def sim(a, b):
 def read_text_any(path):
     """Lit un .txt en UTF-8 (avec ou sans BOM), sinon en Windows-1252 (Bloc-notes / Word)."""
     raw = Path(path).read_bytes()
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return raw.decode("utf-16")
     for enc in ("utf-8-sig", "cp1252"):
         try:
             return raw.decode(enc)
